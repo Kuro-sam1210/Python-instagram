@@ -17,7 +17,7 @@ Base = declarative_base()
 # Add `checkfirst=True` to only create the table if it doesn't exist
 Base.metadata.create_all(engine, checkfirst=True)
 
-# Define a Reels model
+# Define a Reels model (keep for compatibility, but not used)
 class Reel(Base):
     __tablename__ = 'reels'
 
@@ -31,6 +31,20 @@ class Reel(Base):
     data = Column(String)
     is_posted = Column(Boolean)
     posted_at = Column(DateTime)
+
+# Define a ScheduledPost model
+class ScheduledPost(Base):
+    __tablename__ = 'scheduled_posts'
+
+    id = Column(Integer, primary_key=True)
+    file_path = Column(String)
+    caption = Column(String)
+    hashtags = Column(String)
+    schedule_time = Column(DateTime)
+    target_accounts = Column(String)  # JSON list of usernames
+    is_posted = Column(Boolean, default=False)
+    posted_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class Config(Base):
     __tablename__ = 'config'
