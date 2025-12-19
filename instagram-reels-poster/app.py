@@ -3,20 +3,35 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from cryptography.fernet import Fernet
 import os
 from datetime import datetime, timezone
 import json
 import logging
+import uuid
+from werkzeug.utils import secure_filename
+from functools import wraps
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///reels_poster.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching
+API_KEY = os.environ.get('API_KEY', 'dev-api-key')
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB limit
+
+# File upload security
+ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 db = SQLAlchemy(app)
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(jobstores={'default': SQLAlchemyJobStore(url='sqlite:///scheduler.db')})
 scheduler.start()
 
 # Rate limiting setup
@@ -38,10 +53,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# API Key authentication
+def require_api_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.headers.get('X-API-Key') != API_KEY:
+            return jsonify({'message': 'Invalid API key'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
 # Encryption setup
-ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY', Fernet.generate_key().decode())
-if not ENCRYPTION_KEY or ENCRYPTION_KEY == Fernet.generate_key().decode():
-    logger.warning("Using default encryption key. Generate a secure key in production!")
+ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY')
+if not ENCRYPTION_KEY:
+    logger.warning("ENCRYPTION_KEY not set, generating one. Set it in production for persistence!")
+    ENCRYPTION_KEY = Fernet.generate_key().decode()
 try:
     cipher = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 except Exception as e:
@@ -105,6 +130,7 @@ def add_cache_control(response):
 
 @app.route('/api/accounts', methods=['GET', 'POST'])
 @limiter.limit("30 per minute")
+@require_api_key
 def manage_accounts():
     if request.method == 'POST':
         try:
@@ -163,6 +189,7 @@ def manage_accounts():
 
 @app.route('/api/accounts/<int:account_id>', methods=['DELETE'])
 @limiter.limit("20 per minute")
+@require_api_key
 def delete_account(account_id):
     try:
         account = Account.query.get(account_id)
@@ -185,43 +212,46 @@ def delete_account(account_id):
 
 @app.route('/api/posts', methods=['GET', 'POST'])
 @limiter.limit("30 per minute")
+@require_api_key
 def manage_posts():
     if request.method == 'POST':
         try:
-            data = request.json
-            
-            # Input validation
-            if not data or 'accountId' not in data or 'videoPath' not in data or 'scheduledTime' not in data:
-                return jsonify({'message': 'accountId, videoPath, and scheduledTime are required'}), 400
-            
-            video_path = data['videoPath'].strip()
-            
-            if not video_path or len(video_path) > 500:
-                return jsonify({'message': 'Video path is invalid'}), 400
-            
-            # Validate file exists
-            if not os.path.exists(video_path):
-                return jsonify({'message': 'Video file does not exist'}), 400
-            
+            # Use request.form for text fields and request.files for the video
+            account_id = request.form.get('accountId')
+            caption = request.form.get('caption', '')
+            hashtags = request.form.get('hashtags', '')
+            scheduled_time_str = request.form.get('scheduledTime')
+
+            if 'videoFile' not in request.files:
+                return jsonify({'message': 'No video file uploaded'}), 400
+
+            video_file = request.files['videoFile']
+
+            if video_file.filename == '':
+                return jsonify({'message': 'No selected file'}), 400
+
+            if not allowed_file(video_file.filename):
+                return jsonify({'message': 'Invalid file type. Only MP4, MOV, AVI allowed'}), 400
+
+            # Create a unique filename to avoid overwrites
+            filename = f"{uuid.uuid4()}_{secure_filename(video_file.filename)}"
+            video_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            video_file.save(video_path)
+
             # Validate scheduled time
-            try:
-                scheduled_time = datetime.fromisoformat(data['scheduledTime'])
-                if scheduled_time <= datetime.now(timezone.utc):
-                    return jsonify({'message': 'Scheduled time must be in the future'}), 400
-            except ValueError:
-                return jsonify({'message': 'Invalid scheduled time format'}), 400
-            
+            scheduled_time = datetime.fromisoformat(scheduled_time_str).replace(tzinfo=timezone.utc)
+
             # Verify account exists
-            account = Account.query.get(data['accountId'])
+            account = Account.query.get(account_id)
             if not account:
                 return jsonify({'message': 'Account not found'}), 404
-            
+
             try:
                 post = Post(
-                    account_id=data['accountId'],
-                    video_path=video_path,
-                    caption=data.get('caption', '').strip()[:1000],  # Limit to 1000 chars
-                    hashtags=data.get('hashtags', '').strip()[:500],  # Limit to 500 chars
+                    account_id=account_id,
+                    video_path=os.path.abspath(video_path),  # Use absolute path for the worker
+                    caption=caption.strip()[:1000],  # Limit to 1000 chars
+                    hashtags=hashtags.strip()[:500],  # Limit to 500 chars
                     scheduled_time=scheduled_time
                 )
                 db.session.add(post)
@@ -263,62 +293,83 @@ def manage_posts():
         return jsonify({'message': 'Failed to retrieve posts'}), 500
 
 def post_to_instagram(post_id):
-    from instagrapi import Client
+    """Post to Instagram - runs in background scheduler"""
+    with app.app_context():  # Critical for database access
+        from instagrapi import Client
 
-    post = Post.query.get(post_id)
-    if not post:
-        logger.error(f"Post {post_id} not found")
-        return
+        post = Post.query.get(post_id)
+        if not post:
+            logger.error(f"Post {post_id} not found")
+            return
 
-    logger.info(f"Starting post upload for {post_id}")
-    account = post.account
-    try:
-        api = Client()
-        api.delay_range = [1, 3]
+        logger.info(f"Starting post upload for {post_id}")
+        account = post.account
 
-        # Load session if exists
-        if account.session_data:
-            try:
-                session_dict = json.loads(account.session_data)
-                api.set_settings(session_dict)
-                api.login(account.username, decrypt_password(account.password))
-                logger.info(f"Logged in with session for {account.username}")
-            except Exception as e:
-                logger.warning(f"Session login failed, attempting fresh login: {e}")
-                api.login(account.username, decrypt_password(account.password))
-        else:
-            api.login(account.username, decrypt_password(account.password))
-            # Save session
-            try:
-                account.session_data = json.dumps(api.get_settings())
-                db.session.commit()
-                logger.info(f"Logged in and saved session for {account.username}")
-            except Exception as e:
-                logger.warning(f"Failed to save session: {e}")
-
-        # Post the reel
-        full_caption = f"{post.caption}\n\n{post.hashtags}".strip()
-        logger.info(f"Uploading video {post.video_path} with caption: {full_caption[:50]}...")
-        
-        media = api.clip_upload(post.video_path, full_caption)
-
-        if media:
-            post.status = 'posted'
-            post.posted_at = datetime.now(timezone.utc)
-            db.session.commit()
-            logger.info(f"Post {post_id} uploaded successfully")
-        else:
+        if not account:
+            logger.error(f"Account not found for post {post_id}")
             post.status = 'failed'
             db.session.commit()
-            logger.error(f"Post {post_id} failed: no media returned")
+            return
 
-    except Exception as e:
-        post.status = 'failed'
-        db.session.commit()
-        logger.error(f"Posting failed for post {post_id}: {str(e)}", exc_info=True)
+        try:
+            api = Client()
+            api.delay_range = [1, 3]
+
+            # Load session if exists
+            if account.session_data:
+                try:
+                    session_dict = json.loads(account.session_data)
+                    api.set_settings(session_dict)
+                    api.login(account.username, decrypt_password(account.password))
+                    logger.info(f"Logged in with session for {account.username}")
+                except Exception as e:
+                    logger.warning(f"Session login failed, attempting fresh login: {e}")
+                    api.login(account.username, decrypt_password(account.password))
+            else:
+                api.login(account.username, decrypt_password(account.password))
+                # Save session
+                try:
+                    account.session_data = json.dumps(api.get_settings())
+                    db.session.commit()
+                    logger.info(f"Logged in and saved session for {account.username}")
+                except Exception as e:
+                    logger.warning(f"Failed to save session: {e}")
+
+            # Post the reel
+            full_caption = f"{post.caption}\n\n{post.hashtags}".strip()
+            logger.info(f"Uploading video {post.video_path} with caption: {full_caption[:50]}...")
+
+            # Verify video file exists
+            if not os.path.exists(post.video_path):
+                raise FileNotFoundError(f"Video file not found: {post.video_path}")
+
+            media = api.clip_upload(path=post.video_path, caption=full_caption)
+
+            if media:
+                post.status = 'posted'
+                post.posted_at = datetime.now(timezone.utc)
+                db.session.commit()
+                logger.info(f"Post {post_id} uploaded successfully")
+                # Cleanup uploaded file after successful post
+                try:
+                    if os.path.exists(post.video_path):
+                        os.remove(post.video_path)
+                        logger.info(f"Cleaned up video file: {post.video_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup video file {post.video_path}: {e}")
+            else:
+                post.status = 'failed'
+                db.session.commit()
+                logger.error(f"Post {post_id} failed: no media returned")
+
+        except Exception as e:
+            post.status = 'failed'
+            db.session.commit()
+            logger.error(f"Posting failed for post {post_id}: {str(e)}", exc_info=True)
 
 @app.route('/api/schedule-config', methods=['GET', 'PUT'])
 @limiter.limit("20 per minute")
+@require_api_key
 def schedule_config():
     try:
         config = ScheduleConfig.query.first()
@@ -356,6 +407,7 @@ def schedule_config():
 
 @app.route('/api/posts/<int:post_id>', methods=['DELETE'])
 @limiter.limit("20 per minute")
+@require_api_key
 def delete_post(post_id):
     try:
         post = Post.query.get(post_id)
