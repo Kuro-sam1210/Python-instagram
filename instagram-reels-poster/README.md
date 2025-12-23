@@ -12,17 +12,50 @@ A web-based automation tool for scheduling and posting Instagram reels to multip
 - **Web Dashboard**: Easy-to-use interface for management
 - **Secure Storage**: Encrypted credentials and session management
 
-## Setup
+## Quick Setup
 
-1. **Clone and Install Dependencies**:
+**Automated Setup (Recommended)**:
+
+```bash
+# Make setup script executable (Linux/macOS)
+chmod +x setup.sh
+./setup.sh
+
+# Or on Windows with bash:
+bash setup.sh
+```
+
+The setup script will:
+- Check Python version compatibility
+- Create virtual environment
+- Install dependencies
+- Generate secure keys (API_KEY, ENCRYPTION_KEY, SECRET_KEY, DEVICE_SALT)
+- Initialize database
+- Create uploads directory
+
+**Manual Setup**:
+
+1. **Install Dependencies**:
    ```bash
-   cd instagram-reels-poster
    pip install -r requirements.txt
    ```
 
 2. **Environment Configuration**:
-   - Copy `.env` and update the values
-   - Generate encryption key: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+   - Copy `.env.example` to `.env`
+   - Generate required keys:
+     ```bash
+     # API key for authentication
+     python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+     # Encryption key for passwords
+     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+     # Secret key for Flask sessions
+     python -c "import secrets; print(secrets.token_hex(32))"
+
+     # Device salt for consistent fingerprints (IMPORTANT: Never change in production!)
+     python -c "import secrets; print(secrets.token_hex(32))"
+     ```
 
 3. **Run the Application**:
    ```bash
@@ -58,9 +91,11 @@ To enable Google Drive integration:
 
 ## Security Notes
 
-- Credentials are encrypted using Fernet encryption
-- Instagram sessions are cached for efficiency
-- Use at your own risk - Instagram may ban accounts for automation
+- **Encrypted Storage**: Credentials are encrypted using Fernet encryption
+- **Device Consistency**: Device fingerprints use a separate salt (DEVICE_SALT) to remain consistent even if encryption keys are rotated
+- **Session Management**: Instagram sessions are stored in JSON files and automatically refreshed when needed
+- **WARNING**: Never change DEVICE_SALT in production - it will invalidate all existing sessions
+- **Risk**: Use at your own risk - Instagram may ban accounts for automation
 
 ## API Endpoints
 
@@ -70,8 +105,9 @@ To enable Google Drive integration:
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.9+
 - Instagram accounts (preferably Business/Creator accounts)
+- ffmpeg (optional, for video validation)
 - Google Drive API credentials (optional)
 
 ## Disclaimer

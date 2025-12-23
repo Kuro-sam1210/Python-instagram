@@ -1,0 +1,43 @@
+{
+    "uuids": {
+        "phone_id": "3d5228af-3411-118e-6c5a-8237a6045630",
+        "uuid": "b0270702-9715-15ed-84bb-ae07e486af42",
+        "client_session_id": "ac95c2bf-83e2-505a-12ca-24f3ba196ec5",
+        "advertising_id": "f79434cd-fbfa-3cb7-7743-0bdbb3409a6c",
+        "android_device_id": "android-13b4192f7faea6df",
+        "request_id": "2f04b12d-23ad-4f2c-9582-b73de485778a",
+        "tray_session_id": "ab2a6034-a1e9-4506-8e2c-7fb3018fc2f9"
+    },
+    "mid": "aUmeigABAAFGKBUxgcvkg2vAUJkT",
+    "ig_u_rur": null,
+    "ig_www_claim": null,
+    "authorization_data": {
+        "ds_user_id": "6294475202",
+        "sessionid": "6294475202%3AY4uvZYSVAB9Gum%3A28%3AAYiw9m-CW3YUyHYUcitBhLxzcVqp4tt6-hM1vMRwyQ"
+    },
+    "cookies": {},
+    "last_login": 1766432418.9321594,
+    "device_settings": {
+        "app_version": "269.0.0.18.75",
+        "android_version": 12,
+        "android_release": "12",
+        "dpi": "420dpi",
+        "resolution": "1080x2340",
+        "manufacturer": "Google",
+        "device": "oriole",
+        "model": "Pixel 6",
+        "cpu": "tensor",
+        "uuids": {
+            "phone_id": "3d5228af-3411-118e-6c5a-8237a6045630",
+            "uuid": "b0270702-9715-15ed-84bb-ae07e486af42",
+            "client_session_id": "ac95c2bf-83e2-505a-12ca-24f3ba196ec5",
+            "advertising_id": "f79434cd-fbfa-3cb7-7743-0bdbb3409a6c",
+            "device_id": "android-7990af1f7aa23222"
+        }
+    },
+    "user_agent": "Instagram 269.0.0.18.75 Android (26/8.0.0; 480dpi; 1080x1920; OnePlus; 6T Dev; devitron; qcom; en_US; 314665256)",
+    "country": "US",
+    "country_code": 1,
+    "locale": "en_US",
+    "timezone_offset": -14400
+}

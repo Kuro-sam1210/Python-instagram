@@ -12,7 +12,7 @@
 <body>
     <nav class="navbar navbar-dark bg-dark">
         <div class="container">
-            <span class="navbar-brand mb-0 h1">Instagram Reels Poste</span>
+            <span class="navbar-brand mb-0 h1">Instagram Reels Poster</span>
         </div>
     </nav>
 
@@ -36,6 +36,7 @@
                     </div>
                     <div class="card-body">
                         <button class="btn btn-success mb-3" data-bs-toggle="modal" data-bs-target="#addPostModal">Schedule New Post</button>
+                        <button class="btn btn-warning mb-3 ms-2" onclick="clearFailedPosts()">Clear Failed Posts</button>
                         <div id="postsList"></div>
                     </div>
                 </div>
@@ -113,17 +114,18 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // === CHANGE THIS ONLY ONCE ===
+        const API_KEY = 'Q1S5q9XgAhRt5sHS1cUYyd_obCrn95UKgU9QQCl0hr4';  // ← Your real API key from .env
+
         let accountsModal;
         let postsModal;
 
-        // Load data on page load
         document.addEventListener('DOMContentLoaded', function() {
             accountsModal = new bootstrap.Modal(document.getElementById('addAccountModal'));
             postsModal = new bootstrap.Modal(document.getElementById('addPostModal'));
             loadAccounts();
             loadPosts();
-            // Refresh posts every 30 seconds
-            setInterval(loadPosts, 30000);
+            setInterval(loadPosts, 30000); // Refresh posts every 30 seconds
         });
 
         function showAlert(message, type = 'danger') {
@@ -139,7 +141,7 @@
 
         function loadAccounts() {
             fetch('/api/accounts', {
-                headers: { 'X-API-Key': 'dev-api-key' }
+                headers: { 'X-API-Key': API_KEY }
             })
                 .then(response => {
                     if (!response.ok) throw new Error('Failed to load accounts');
@@ -155,9 +157,10 @@
                         list.innerHTML = '<p class="text-muted">No accounts added yet</p>';
                     } else {
                         accounts.forEach(account => {
-                            const statusBadge = account.is_active ? 
-                                '<span class="badge bg-success">Active</span>' : 
+                            const statusBadge = account.is_active ?
+                                '<span class="badge bg-success">Active</span>' :
                                 '<span class="badge bg-warning">Inactive</span>';
+
                             list.innerHTML += `
                                 <div class="alert alert-info d-flex justify-content-between align-items-center mb-2">
                                     <div>
@@ -179,7 +182,7 @@
 
         function loadPosts() {
             fetch('/api/posts', {
-                headers: { 'X-API-Key': 'dev-api-key' }
+                headers: { 'X-API-Key': API_KEY }
             })
                 .then(response => {
                     if (!response.ok) throw new Error('Failed to load posts');
@@ -195,24 +198,28 @@
                     }
 
                     posts.forEach(post => {
-                        const statusClass = post.status === 'posted' ? 'success' : post.status === 'failed' ? 'danger' : 'warning';
-                        const deleteButton = post.status === 'pending' ? 
+                        const statusClass = post.status === 'posted' ? 'success' :
+                                           post.status === 'failed' ? 'danger' : 'warning';
+
+                        const deleteButton = post.status === 'pending' ?
                             `<button class="btn btn-danger btn-sm ms-2" onclick="deletePost(${post.id})">Delete</button>` : '';
-                        const scheduledDate = new Date(post.scheduled_time);
+
+                        const scheduledDate = new Date(post.scheduled_time).toLocaleString();
                         const postedDate = post.posted_at ? new Date(post.posted_at).toLocaleString() : 'N/A';
-                        
+
                         list.innerHTML += `
                             <div class="card mb-2">
                                 <div class="card-body">
-                                    <h6 class="card-title">${escapeHtml(post.account_username)}</h6>
+                                    <h6 class="card-title">${escapeHtml(post.account_username || 'Deleted Account')}</h6>
                                     <p class="card-text">${escapeHtml(post.caption || 'No caption')}</p>
-                                    <p class="card-text"><small class="text-muted">Path: ${escapeHtml(post.video_path)}</small></p>
-                                    <p class="card-text"><small class="text-muted">Scheduled: ${scheduledDate.toLocaleString()}</small></p>
+                                    <p class="card-text"><small class="text-muted">Video: ${escapeHtml(post.video_filename)}</small></p>
+                                    <p class="card-text"><small class="text-muted">Scheduled: ${scheduledDate}</small></p>
                                     <p class="card-text"><small class="text-muted">Posted: ${postedDate}</small></p>
                                     <div>
                                         <span class="badge bg-${statusClass}">${escapeHtml(post.status)}</span>
                                         ${deleteButton}
                                     </div>
+                                    ${post.error_message ? `<p class="text-danger mt-2"><small>Error: ${escapeHtml(post.error_message)}</small></p>` : ''}
                                 </div>
                             </div>
                         `;
@@ -228,17 +235,14 @@
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value.trim();
 
-            // Validation
             if (!username || !password) {
                 showAlert('Username and password are required', 'danger');
                 return;
             }
-
             if (username.length < 3) {
                 showAlert('Username must be at least 3 characters', 'danger');
                 return;
             }
-
             if (password.length < 6) {
                 showAlert('Password must be at least 6 characters', 'danger');
                 return;
@@ -250,14 +254,15 @@
 
             fetch('/api/accounts', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-API-Key': 'dev-api-key' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': API_KEY
+                },
                 body: JSON.stringify({ username, password })
             })
             .then(response => response.json().then(data => ({ ok: response.ok, data })))
             .then(({ ok, data }) => {
-                if (data.message) {
-                    showAlert(data.message, ok ? 'success' : 'danger');
-                }
+                showAlert(data.message, ok ? 'success' : 'danger');
                 if (ok) {
                     document.getElementById('accountForm').reset();
                     accountsModal.hide();
@@ -275,11 +280,11 @@
         }
 
         function deleteAccount(accountId) {
-            if (!confirm('Are you sure you want to delete this account? This action cannot be undone.')) return;
+            if (!confirm('Are you sure you want to delete this account? This cannot be undone.')) return;
 
             fetch(`/api/accounts/${accountId}`, {
                 method: 'DELETE',
-                headers: { 'X-API-Key': 'dev-api-key' }
+                headers: { 'X-API-Key': API_KEY }
             })
             .then(response => response.json())
             .then(data => {
@@ -293,38 +298,22 @@
         }
 
         function addPost() {
-            const formData = new FormData();
-            const videoInput = document.getElementById('videoFile');
-
-            // Validation
             const accountId = document.getElementById('accountId').value;
+            const videoFile = document.getElementById('videoFile').files[0];
             const caption = document.getElementById('caption').value.trim();
             const hashtags = document.getElementById('hashtags').value.trim();
             const scheduledTime = document.getElementById('scheduledTime').value;
 
-            if (!accountId) {
-                showAlert('Please select an account', 'danger');
-                return;
-            }
-
-            if (!videoInput.files[0]) {
-                showAlert('Please select a video file', 'danger');
-                return;
-            }
-
-            if (!scheduledTime) {
-                showAlert('Scheduled time is required', 'danger');
-                return;
-            }
+            if (!accountId) { showAlert('Please select an account', 'danger'); return; }
+            if (!videoFile) { showAlert('Please select a video file', 'danger'); return; }
+            if (!scheduledTime) { showAlert('Scheduled time is required', 'danger'); return; }
 
             const btn = event.target;
             btn.disabled = true;
             btn.innerHTML = 'Scheduling...';
 
-            // Append the file
-            formData.append('videoFile', videoInput.files[0]);
-
-            // Append the other fields
+            const formData = new FormData();
+            formData.append('videoFile', videoFile);
             formData.append('accountId', accountId);
             formData.append('caption', caption);
             formData.append('hashtags', hashtags);
@@ -332,8 +321,8 @@
 
             fetch('/api/posts', {
                 method: 'POST',
-                headers: { 'X-API-Key': 'dev-api-key' },
-                body: formData  // Note: Do NOT set Content-Type header; the browser does it for you
+                headers: { 'X-API-Key': API_KEY },
+                body: formData
             })
             .then(response => response.json().then(data => ({ ok: response.ok, data })))
             .then(({ ok, data }) => {
@@ -359,7 +348,7 @@
 
             fetch(`/api/posts/${postId}`, {
                 method: 'DELETE',
-                headers: { 'X-API-Key': 'dev-api-key' }
+                headers: { 'X-API-Key': API_KEY }
             })
             .then(response => response.json())
             .then(data => {
@@ -372,9 +361,27 @@
             });
         }
 
+        function clearFailedPosts() {
+            if (!confirm('Are you sure you want to delete all failed posts? This cannot be undone.')) return;
+
+            fetch('/api/posts/failed', {
+                method: 'DELETE',
+                headers: { 'X-API-Key': API_KEY }
+            })
+            .then(response => response.json())
+            .then(data => {
+                showAlert(data.message, 'success');
+                loadPosts();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showAlert('Failed to clear failed posts', 'danger');
+            });
+        }
+
         function escapeHtml(text) {
             const div = document.createElement('div');
-            div.textContent = text;
+            div.textContent = text || '';
             return div.innerHTML;
         }
     </script>
